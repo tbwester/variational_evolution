@@ -350,7 +350,6 @@ class Organism(object):
     def breed(self, org):
         ''' combine features of this organism with another into a new one '''
         comps = list(self._function_components)
-        #print('l', len(comps))
         ops = list(self._function_operators)
         comps.extend(org.function_components)
         ops.extend(org.function_operators)
@@ -375,7 +374,7 @@ class Organism(object):
 
 # it would be more straightfotward to call organism's compute function directly,
 # but we need these wrappers to use python multiprocessing
-def compute_lazy(org, h=HAMILTONIANS[3]):
+def compute_lazy(org, h=HAMILTONIANS[0]):
     ''' computes only if organism hasn't been computed yet '''
     if org.fitness is None:
         org.compute(h)
@@ -403,7 +402,7 @@ if __name__ == '__main__':
             print(generation)
 
         # parallelize!
-        pool = Pool(processes=8)
+        pool = Pool(processes=4)
         population = pool.map(compute_lazy, population)
         pool.close()
         fitnesses = [o.fitness for o in population]
@@ -471,7 +470,7 @@ if __name__ == '__main__':
     fig = plt.figure()
     ax = fig.add_subplot(111)
 
-    h, energy_exact, xs = HAMILTONIANS[3]
+    h, energy_exact, xs = HAMILTONIANS[0]
     sign_even = 1 if energy_exact[1][int(H_DIM/4), 0] > 0 else -1
     sign_odd = 1 if energy_exact[1][int(H_DIM/4), 1] < 0 else -1
 
@@ -482,7 +481,6 @@ if __name__ == '__main__':
     best_func_asym = lambda x, p: eval(best_o.function_string_asym) / norm(eval(best_o.function_string_asym))
     ax.plot(xs, best_func(xs, best_o.best_fit), 'b', linewidth=2, label=best_o.function_string)
     ax.plot(xs, best_func_asym(xs, best_o.best_fit_asym), 'b--', linewidth=2, label=best_o.function_string)
-    #ax.plot(X, M*W**2/(8*L**2)*(X**2-L**2)**2, 'k', linewidth=2, label='Potential')
     ax.legend()
 
     plt.savefig('best.pdf')

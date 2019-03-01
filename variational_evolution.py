@@ -42,17 +42,16 @@ H_DIM = 200
 # Potential parameters
 M = 1.0
 W = 1.0
-L = 4.0
 
-def hamiltonian(l=4):
+def hamiltonian(epsilon=4):
     ''' Generate a Hamiltonian in matrix form, return matrix, eigen values, and x range '''
-    x_max = l + 5 * np.sqrt(1./(2 * M * W)) 
+    x_max = epsilon + 5 * np.sqrt(1./(2 * M * W)) 
     x_min = - x_max
 
     x, dx = np.linspace(x_min, x_max, H_DIM, retstep=True)
 
     #v_x = 0.5 * M * W**2 * X**2 + 0.25 * epsilon * X**4   
-    v_x = M * W**2 / (8 * l**2) * (x**2 - l**2)**2    
+    v_x = M * W**2 / (8 * epsilon**2) * (x**2 - epsilon**2)**2    
 
     # Solve Hamiltonian exactly in matrix basis
     v = scipy.sparse.diags(v_x)
@@ -76,10 +75,14 @@ HAMILTONIANS = [hamiltonian(x) for x in np.linspace(3, 5, 5)]
 class Organism(object):
     ''' Organism class which holds data about trial functions during each cycle '''
 
-    def __init__(self, func_comps=None, func_ops=None, guesses=None, guesses_asym=None):
+    def __init__(self, func_comps=None, func_ops=None, guesses=None, guesses_asym=None, symmetric=True):
         # age increments such that this organism will die if it gets too old
         # keeps population dynamic
         self._age = 0
+
+        # boolean sets whether or not to generate symmetric/anti-symmetric
+        # versions of the function. Depends on the hamiltonian
+        self._symmetric = symmetric
 
         # initialize this organism's function
         self._function_components = func_comps
@@ -105,13 +108,14 @@ class Organism(object):
         self._fidelity = None
         self._split_error = None
         self._fidelity_error = None
+        self._energy_error = None
 
     def set_functions(self):
         ''' Build a function from function component strings '''
         func_string = ''
         func_string_asym = ''
         for i, term in enumerate(self._function_components):
-            if i == 0:
+            if i == 0 and self._symmetric:
                 func_string += '(' + term + ' + ' + term.replace('x*', '-x*') + ')'
                 func_string_asym += '(' + term + ' - ' + term.replace('x*', '-x*') + ')'
             else:
@@ -174,6 +178,10 @@ class Organism(object):
         return self._split_error
     
     @property
+    def energy_error(self):
+        return self._energy_error
+    
+    @property
     def fidelity(self):
         return self._fidelity
 
@@ -202,28 +210,33 @@ class Organism(object):
 
         h, energy_exact, xs = hamiltonian
 
-        # evaluate wavefunction for given set of parameters
-        psi_func = lambda x, p: eval(self._function_string) / norm(eval(self._function_string))
-        psi_func_asym = lambda x, p: eval(self._function_string_asym) / norm(eval(self._function_string_asym))
-
         # function to minimize
-        def energy(params, psi):
+        def find_energy(params, psi):
             psi_eval = psi(xs, params)
             energy = np.dot(np.conj(psi_eval), h.dot(psi_eval))
             return energy
 
-        optimizer = scipy.optimize.minimize(energy, guess, args=(psi_func))
-        optimizer_asym = scipy.optimize.minimize(energy, guess_asym, args=(psi_func_asym))
+        # evaluate wavefunction for given set of parameters
+        # compute results of fit
+        psi_func = lambda x, p: eval(self._function_string) / norm(eval(self._function_string))
+        optimizer = scipy.optimize.minimize(find_energy, guess, args=(psi_func))
         self._best_fit = optimizer['x']
-        self._best_fit_asym = optimizer_asym['x']
-
         energy = optimizer['fun']
-        energy_asym = optimizer_asym['fun']
 
-        self._energy_split = energy_asym - energy
-        num_split = energy_exact[0][1] - energy_exact[0][0]
+        # for symmetric-type organisms, we need to compute an additional fit for anti-symmetric version of function
+        # and we get a splitting error instead of an absolute energy error
+        if self._symmetric:
+            psi_func_asym = lambda x, p: eval(self._function_string_asym) / norm(eval(self._function_string_asym))
+            optimizer_asym = scipy.optimize.minimize(find_energy, guess_asym, args=(psi_func_asym))
+            self._best_fit_asym = optimizer_asym['x']
+            energy_asym = optimizer_asym['fun']
 
-        self._split_error = np.abs(self._energy_split - num_split) / num_split
+            self._energy_split = energy_asym - energy
+            num_split = energy_exact[0][1] - energy_exact[0][0]
+
+            self._split_error = np.abs(self._energy_split - num_split) / num_split
+        else:
+            self._best_fit_asym = [0., 0.]
 
         self._fidelity = np.abs(
                 np.conj(energy_exact[1][:,0]).dot(psi_func(xs, self._best_fit))
@@ -231,17 +244,29 @@ class Organism(object):
         self._fidelity_error = 1.0 - self._fidelity
 
         # want both small energy splitting and good function agreement
-        self._fitness = (1. / self._split_error) * (1. / self._fidelity_error)
+        if self._symmetric:
+            self._fitness = (1. / self._split_error) * (1. / self._fidelity_error)
+        else:
+            self._energy_error = np.abs(energy - energy_exact[0][0]) / energy_exact[0][0]
+            self._fitness = (1. / self._energy_error) * (1. / self._fidelity_error)
         
         # minimum fidelity cut
         if self._fidelity < 0.9:
             self._fitness /= 100
 
         # minimum energy split cut
-        if self._split_error > 0.5:
-            self._fitness /= 100
+        if self._symmetric:
+            if self._split_error > 0.5:
+                self._fitness /= 100
+            if np.isnan(self._split_error):
+                self._fitness = 0
+        else:
+            if self._energy_error > 0.5:
+                self._fitness /= 100
+            if np.isnan(self._energy_error):
+                self._fitness = 0
 
-        if np.isnan(self._fidelity_error) or np.isnan(self._split_error):
+        if np.isnan(self._fidelity_error):
             self._fitness = 0.0
 
 
@@ -365,7 +390,7 @@ class Organism(object):
                 # pick a random one
                 new_ops.append(np.random.choice(OPERATORS))
 
-        child = Organism(new_comps, new_ops)
+        child = Organism(new_comps, new_ops, symmetric=self._symmetric)
         if np.random.uniform() > MUTATION_RATE:
             child.mutate()
 
@@ -391,7 +416,7 @@ if __name__ == '__main__':
     best_o = None
 
     generation = 0
-    population = [Organism() for x in range(0, POPULATION_SIZE)]
+    population = [Organism(symmetric=False) for x in range(0, POPULATION_SIZE)]
 
     with open('log.txt', 'a') as f:
         f.write('generation,min_fit,max_fit,avg_Fit,med_fit\n')
@@ -423,7 +448,8 @@ if __name__ == '__main__':
                         'energy_split': best_o.energy_split,
                         'split_error': best_o.split_error,
                         'fidelity': best_o.fidelity,
-                        'fidelity_error': best_o.fidelity_error
+                        'fidelity_error': best_o.fidelity_error,
+                        'energy_error': best_o.energy_error
                         }
                 f.write(json.dumps(org_data,indent=4, sort_keys=True) + ',\n')
 

@@ -14,6 +14,8 @@ The program defaults to run for 10 generations, with 200 trial functions per gen
 
 Written for Python2.7. Untested for Python3, but it will probably work with minimal adjustments.
 
+Requires `numpy`, `scipy`, `matplotlib`.
+
 ### Function Parameters:
  
 - `COMPONENTS` List of possible functions that can be included in an organism's trial function. Capital `I`s are replaced by integers from [-6,6]. Empty parentheses `()` are replaced by polynomials up to degree 4.

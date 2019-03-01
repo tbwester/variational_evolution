@@ -416,7 +416,8 @@ if __name__ == '__main__':
     best_o = None
 
     generation = 0
-    population = [Organism(symmetric=False) for x in range(0, POPULATION_SIZE)]
+
+    population = [Organism(symmetric=True) for x in range(0, POPULATION_SIZE)]
 
     with open('log.txt', 'a') as f:
         f.write('generation,min_fit,max_fit,avg_Fit,med_fit\n')
